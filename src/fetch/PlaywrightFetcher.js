@@ -8,6 +8,8 @@ import { BaseFetcher } from './BaseFetcher.js';
 import { analyzePagination } from './prompts.js';
 import { createChannel } from '../util.js';
 
+import { Template } from '../template/Template.js';
+
 export const PlaywrightFetcher = class extends BaseFetcher {
   constructor(options) {
     super(options);
@@ -246,11 +248,74 @@ export const PlaywrightFetcher = class extends BaseFetcher {
     logger.info(`${this} yielding first page ${doc}`);
     yield Promise.resolve(doc);
 
+    let previousBody = doc.body;
+
     for await (const val of channel.receive()) {
       if (val.end) break;
       yield Promise.resolve(val.doc);
+
+      const currentBody = val.doc.body;
+      const seemsSuccessful = await doesPaginationSeemSuccessful(this.ai, this.cache, previousBody, currentBody);
+      logger.info(`@@@@ doesPaginationSeemSuccessful returned ${seemsSuccessful}`);
+
+      previousBody = currentBody;
     }
   }
+}
+
+const doesPaginationSeemSuccessful = async (ai, cache, previousBody, currentBody) => {
+  logger.debug(`@@@@ in doesPaginationSeemSuccessful; was passed bodies of length ` +
+               `${previousBody ? previousBody.length: "???"} ` +
+               `and ${currentBody ? currentBody.length : "???"}`);
+
+/*
+  // This didn't work, and I'm not sure why.
+
+  const context = {
+    previousBody,
+    currentBody,
+  };
+
+  const template = new Template(
+    ['previousBody', 'currentBody'],
+`Below are the contents of two web pages.  Does the second page
+look like the result of paginating from the first page?
+(That is, if I start on the first page and click a link
+or button to move to the next page, will the second page result?)
+Answer only "yes" or "no", without any additional text.
+
+Here are the pages:
+
+>>> FIRST PAGE:
+{{previousBody}}
+
+>>> SECOND PAGE:
+{{currentBody}}`);
+
+  const prompts = await template.renderMulti(
+          context, 'html', ai, cache);
+*/
+
+  const prompts =
+`Below are the contents of two web pages.  Does the second page
+look like the result of paginating from the first page?
+(That is, if I start on the first page and click a link
+or button to move to the next page, will the second page result?)
+Answer only "yes" or "no", without any additional text.
+
+Here are the pages:
+
+>>> FIRST PAGE:
+${previousBody}
+
+>>> SECOND PAGE:
+${currentBody}`;
+
+  const answer = await ai.ask(prompts, {"format": "text"});
+
+  logger.debug(`@@@@ AI answered ${answer.partial}`);
+
+  return answer.partial == "yes";
 }
 
 const getHtmlFromSuccess = async (page, { loadWait, pullIframes }) => {
