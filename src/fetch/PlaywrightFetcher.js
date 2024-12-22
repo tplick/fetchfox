@@ -248,13 +248,16 @@ export const PlaywrightFetcher = class extends BaseFetcher {
     logger.info(`${this} yielding first page ${doc}`);
     yield Promise.resolve(doc);
 
-    let previousBody = doc.body;
+    const min = new TagRemovingMinimizer(['style', 'script', 'meta', 'link']);
+    let previousMinDoc = await min.min(doc);
+    let previousBody = previousMinDoc.body;
 
     for await (const val of channel.receive()) {
       if (val.end) break;
       yield Promise.resolve(val.doc);
 
-      const currentBody = val.doc.body;
+      const currentMinDoc = await min.min(val.doc);
+      const currentBody = currentMinDoc.body;
       const seemsSuccessful = await doesPaginationSeemSuccessful(this.ai, this.cache, previousBody, currentBody);
       logger.info(`@@@@ doesPaginationSeemSuccessful returned ${seemsSuccessful}`);
 
